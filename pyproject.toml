@@ -1,0 +1,20 @@
+[project]
+name = "assignment-convogrid"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ipykernel>=6.29.5",
+    "streamlit>=1.38.0",
+    "sentence-transformers>=3.1.1",
+    "qdrant-client>=1.11.3",
+    "transformers>=4.45.1",
+    "tiktoken>=0.7.0",
+    "python-dotenv>=1.0.1",
+    "groq>=0.11.0",
+    "ell-ai>=0.0.12",
+    "openai>=1.50.2",
+    "zep-cloud>=1.0.9",
+    "cohere>=5.10.0",
+]
