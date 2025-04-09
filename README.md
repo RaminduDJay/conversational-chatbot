@@ -33,7 +33,7 @@ Clone the project
 Go to the project directory
 
 ```bash
-  cd podcast-chatbot
+  cd conversational-chatbot
 ```
 
 Install dependencies
