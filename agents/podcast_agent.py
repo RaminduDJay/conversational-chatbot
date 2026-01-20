@@ -1,7 +1,14 @@
 import logging
 from typing import Dict, List, Optional, Tuple, Union
 
-from agents.rag_functions import get_documents, graded_documents, llm_generation, halucinations_score, answer_grade, requery
+from agents.rag_function import (
+    get_documents,
+    grade_documents,
+    llm_generation,
+    hallucination_score,
+    evaluate_answer,
+    requery,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -63,7 +70,7 @@ def rag_response(
         
         # Check for hallucinations
         logger.info("Checking for hallucinations in the generated response")
-        score = halucinations_score(documents=used_docs, answer=response)
+        score = hallucination_score(documents=used_docs, answer=response)
         
         if str(score).lower() == "no":
             logger.warning(f"Hallucination detected. Retries remaining: {hallucination_retries-1}")
@@ -143,7 +150,7 @@ def rag_agent(
         
         # Grade documents for relevance
         logger.info("Grading documents for relevance")
-        graded_docs = graded_documents(query=query, documents=documents)
+        graded_docs = grade_documents(query=query, documents=documents)
         
         # Check if documents are relevant
         if len(graded_docs) == 0:
@@ -174,7 +181,7 @@ def rag_agent(
         
         # Grade the answer
         logger.info("Grading the generated answer")
-        grade = answer_grade(answer=response, question=query)
+        grade = evaluate_answer(answer=response, question=query)
         
         # Check if the answer is relevant
         if str(grade).lower() == "no" and answer_retries > 0:
