@@ -1,19 +1,15 @@
-import os
-import cohere
-import groq
-import openai
+from functools import lru_cache
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 load_dotenv()
 
-# Replace OPENAI_API_KEY with DEEPEEK_API_KEY
-deepeek_api_key = os.getenv("DEEPEEK_API_KEY")
-if deepeek_api_key:
-    os.environ["DEEPEEK_API_KEY"] = deepeek_api_key
-    openai.base_url = "https://api.deepseek.com/v1"
+@lru_cache(maxsize=8)
+def get_chat_model(model: str, temperature: float = 0.0) -> ChatOpenAI:
+    """Return a cached OpenAI chat model."""
+    return ChatOpenAI(model=model, temperature=temperature)
 
-groq_client = groq.Groq(
-    api_key=os.getenv('GROQ_API_KEY'),
-)
-
-cohere_client = cohere.ClientV2(os.getenv("COHERE_API_KEY"))
+@lru_cache(maxsize=2)
+def get_embeddings(model: str) -> OpenAIEmbeddings:
+    """Return a cached OpenAI embeddings client."""
+    return OpenAIEmbeddings(model=model)

@@ -12,9 +12,8 @@ dependencies = [
     "transformers>=4.45.1",
     "tiktoken>=0.7.0",
     "python-dotenv>=1.0.1",
-    "groq>=0.11.0",
-    "ell-ai>=0.0.12",
     "openai>=1.50.2",
     "zep-cloud>=1.0.9",
-    "cohere>=5.10.0",
+    "langchain-core>=0.2.38",
+    "langchain-openai>=0.1.22",
 ]

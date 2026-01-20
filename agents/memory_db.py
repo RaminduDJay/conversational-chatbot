@@ -3,11 +3,11 @@ import os
 import uuid
 from typing import Dict, List, Optional
 
-import ell
 from dotenv import load_dotenv
-from zep_cloud.client import Zep
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from zep_cloud import Message
-from agents.clients import groq_client
+from zep_cloud.client import Zep
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -282,7 +282,6 @@ def search_memory(session_id: str, query: str, limit: int = 5) -> List[Dict]:
         logger.error(f"Error searching memory for session {session_id}: {e}")
         raise
 
-@ell.simple(model="llama-3.1-8b-instant", client=groq_client)
 def summarize_conversation(conversation: str) -> str:
     """Summarize a conversation using LLM.
     
@@ -300,13 +299,19 @@ def summarize_conversation(conversation: str) -> str:
         return "No conversation to summarize."
     
     try:
-        return [
-            ell.system("""
-            You are an expert transcriber. you will summarise a text containing a reply from a podcast host. Your summary must contain what was spoken, who spoke about it and the timestamp and url in the format [timestamp](url).\n
-            provide only the summary and nothing else.
-            """),
-            ell.user(conversation)
-        ]
+        model = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+        response = model.invoke(
+            [
+                SystemMessage(
+                    "You are an expert transcriber. You will summarise a text containing "
+                    "a reply from a podcast host. Your summary must contain what was spoken, "
+                    "who spoke about it and the timestamp and url in the format [timestamp](url). "
+                    "Provide only the summary and nothing else."
+                ),
+                HumanMessage(conversation),
+            ]
+        )
+        return response.content
     except Exception as e:
         logger.error(f"Error summarizing conversation: {e}")
         return f"Error summarizing conversation: {str(e)}"

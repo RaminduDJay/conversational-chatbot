@@ -1,10 +1,12 @@
-import os
-import ell 
-from pydantic import BaseModel, Field, validator
-from dotenv import load_dotenv
-from agents.clients import groq_client
-from typing import List, Optional
 import logging
+import os
+from typing import List, Optional
+
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field, validator
+
+from agents.clients import get_chat_model
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -13,27 +15,11 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Initialize ELL
-try:
-    ell.init(store="./logdir")
-    logger.info("ELL initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize ELL: {e}")
-    raise
-
-# Set OpenAI API key with error handling
+# Validate OpenAI API key
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
     logger.error("OPENAI_API_KEY not found in environment variables")
     raise ValueError("OPENAI_API_KEY environment variable is required")
-os.environ["OPENAI_API_KEY"] = openai_api_key
-
-# Set Deep API key with error handling
-openai_api_key = os.getenv("OPENAI_API_KEY")
-if not openai_api_key:
-    logger.error("OPENAI_API_KEY not found in environment variables")
-    raise ValueError("OPENAI_API_KEY environment variable is required")
-os.environ["OPENAI_API_KEY"] = openai_api_key
 
 # Output formats for agents
 class BinaryScoreBase(BaseModel):
@@ -71,8 +57,6 @@ class GradingAgent:
         """Format a list of documents into a single string."""
         return "\n".join(documents)
 
-# RAG agents
-@ell.complex(model="gpt-4o-mini", response_format=GradeDocuments)
 def grade_document(query: str, document: str) -> GradeDocuments:
     """
     Document grading agent, assesses if a document is relevant to a query.
@@ -85,20 +69,21 @@ def grade_document(query: str, document: str) -> GradeDocuments:
         GradeDocuments: Binary score indicating relevance
     """
     try:
-        return [
-            ell.system("""You are a grader assessing relevance of a retrieved document to a user question.
+        model = get_chat_model("gpt-4o-mini", temperature=0.0).with_structured_output(GradeDocuments)
+        messages = [
+            SystemMessage("""You are a grader assessing relevance of a retrieved document to a user question.
                     It does not need to be a stringent test. The goal is to filter out erroneous retrievals.
                     If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant.
                     Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question.
                     """),
-            ell.user(f"Query: {query}\n\nDocument: {document}"),
+            HumanMessage(f"Query: {query}\n\nDocument: {document}"),
         ]
+        return model.invoke(messages)
     except Exception as e:
         logger.error(f"Error in grade_document: {e}")
         # Default to including document in case of error (safer approach)
         return GradeDocuments(binary_score="yes")
 
-@ell.complex(model="gpt-4o-mini", response_format=GradeHallucinations)
 def check_hallucinations(document: List[str], answer: str) -> GradeHallucinations:
     """
     Hallucination grading agent, checks if an answer is grounded in provided documents.
@@ -112,19 +97,20 @@ def check_hallucinations(document: List[str], answer: str) -> GradeHallucination
     """
     try:
         formatted_document = GradingAgent.format_documents(document)
-        return [
-            ell.system("""You are a grader assessing whether an LLM generation is grounded in / supported by a set of retrieved facts.
+        model = get_chat_model("gpt-4o-mini", temperature=0.0).with_structured_output(GradeHallucinations)
+        messages = [
+            SystemMessage("""You are a grader assessing whether an LLM generation is grounded in / supported by a set of retrieved facts.
                 Give a binary score 'yes' or 'no'. 'yes' means that the answer is grounded in / supported by the set of facts else 'no'.
                 The response can be 'yes' or 'no' and nothing else.
                     """),
-            ell.user(f"Set of facts:\n\n{formatted_document}\n\nLLM generation: {answer}"),
+            HumanMessage(f"Set of facts:\n\n{formatted_document}\n\nLLM generation: {answer}"),
         ]
+        return model.invoke(messages)
     except Exception as e:
         logger.error(f"Error in check_hallucinations: {e}")
         # Default to assuming hallucination in case of error (safer approach)
         return GradeHallucinations(binary_score="no")
 
-@ell.complex(model="gpt-4o-mini", response_format=GradeAnswer)
 def grade_answer(answer: str, question: str) -> GradeAnswer:
     """
     Answer grading agent, evaluates if an answer addresses the original question.
@@ -137,20 +123,21 @@ def grade_answer(answer: str, question: str) -> GradeAnswer:
         GradeAnswer: Binary score indicating question resolution
     """
     try:
-        return [
-            ell.system("""You are a grader assessing whether an answer addresses / resolves a question.
+        model = get_chat_model("gpt-4o-mini", temperature=0.0).with_structured_output(GradeAnswer)
+        messages = [
+            SystemMessage("""You are a grader assessing whether an answer addresses / resolves a question.
                 You do not need to be overly strict. The goal is to filter out if irrelevant answers created.
                 As long as the answer is relevant to the question, grade it as relevant.
                 Give a binary score 'yes' or 'no'. 'yes' means that the answer resolves the question else 'no'.
                     """),
-            ell.user(f"Question: {question}\n\nAnswer: {answer}"),
+            HumanMessage(f"Question: {question}\n\nAnswer: {answer}"),
         ]
+        return model.invoke(messages)
     except Exception as e:
         logger.error(f"Error in grade_answer: {e}")
         # Default to assuming answer is not relevant in case of error
         return GradeAnswer(binary_score="no")
 
-@ell.simple(model="gpt-4o-2024-08-06")
 def llm_answer(
     query: str, 
     user_intent: str, 
@@ -225,15 +212,21 @@ def llm_answer(
             system_reminder
         ])
         
-        return [
-            ell.system(system_prompt),
-            ell.user(f"Documents:\n{formatted_documents}\n\nConversation history: {history}\n\nQuery: {query}\nUser Intent: {user_intent}\nAnswer with output emotion: {output_emotion}"),
+        model = get_chat_model("gpt-4o-2024-08-06", temperature=0.2)
+        messages = [
+            SystemMessage(system_prompt),
+            HumanMessage(
+                f"Documents:\n{formatted_documents}\n\n"
+                f"Conversation history: {history}\n\n"
+                f"Query: {query}\nUser Intent: {user_intent}\n"
+                f"Answer with output emotion: {output_emotion}"
+            ),
         ]
+        return model.invoke(messages).content
     except Exception as e:
         logger.error(f"Error in llm_answer: {e}")
         return "I apologize, but I'm having trouble generating a response. Could you please try again with your question?"
 
-@ell.complex(model="llama3-70b-8192", client=groq_client, response_format=RequeryOutput)
 def requery(query: str) -> RequeryOutput:
     """
     Reformulate a user query to improve document retrieval results.
@@ -245,8 +238,9 @@ def requery(query: str) -> RequeryOutput:
         RequeryOutput: Object containing the reformulated query
     """
     try:
-        return [
-            ell.system("""You are a query reformulation expert. Given a user query, you must rewrite it 
+        model = get_chat_model("gpt-4o-mini", temperature=0.0).with_structured_output(RequeryOutput)
+        messages = [
+            SystemMessage("""You are a query reformulation expert. Given a user query, you must rewrite it 
             to improve document retrieval results. Your output should contain only the new query.
             Focus on:
             - Clarifying ambiguous terms
@@ -255,8 +249,9 @@ def requery(query: str) -> RequeryOutput:
             - Removing unnecessary words
             - Maintaining the core intent
             """),
-            ell.user(f"Original query: {query}"),
+            HumanMessage(f"Original query: {query}"),
         ]
+        return model.invoke(messages)
     except Exception as e:
         logger.error(f"Error in requery: {e}")
         # Return original query if reformulation fails

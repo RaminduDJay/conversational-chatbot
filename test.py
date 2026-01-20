@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 # Import the functions being tested
 try:
     from agents.podcast_agent import execute_rag_response
+    import asyncio
     from agents.entry import chatbot_entry
-    from ell import Message
+    from langchain_core.messages import AIMessage, HumanMessage
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     sys.exit(1)
@@ -54,12 +55,12 @@ class TestData:
         {
             "query": "What is the podcast about?",
             "history": [
-                Message(role="user", content="What is the podcast about?"),
-                Message(role="assistant", content="The podcast is about AI and machine learning"),
-                Message(role="user", content="How has machine learning evolved over the years?"),
-                Message(role="assistant", content="Machine learning has evolved significantly over the years, with advancements in deep learning, reinforcement learning, and natural language processing."),
-                Message(role="user", content="What are the key applications of AI in healthcare?"),
-                Message(role="assistant", content="AI is used in healthcare for medical imaging, drug discovery, personalized treatment, and predictive analytics."),
+                HumanMessage(content="What is the podcast about?"),
+                AIMessage(content="The podcast is about AI and machine learning"),
+                HumanMessage(content="How has machine learning evolved over the years?"),
+                AIMessage(content="Machine learning has evolved significantly over the years, with advancements in deep learning, reinforcement learning, and natural language processing."),
+                HumanMessage(content="What are the key applications of AI in healthcare?"),
+                AIMessage(content="AI is used in healthcare for medical imaging, drug discovery, personalized treatment, and predictive analytics."),
             ],
             "facts": "The podcast is about AI and machine learning",
             "description": "Test query about podcast topic with history"
@@ -67,8 +68,8 @@ class TestData:
         {
             "query": "What was the last topic discussed?",
             "history": [
-                Message(role="user", content="What are the key applications of AI in healthcare?"),
-                Message(role="assistant", content="AI is used in healthcare for medical imaging, drug discovery, personalized treatment, and predictive analytics."),
+                HumanMessage(content="What are the key applications of AI in healthcare?"),
+                AIMessage(content="AI is used in healthcare for medical imaging, drug discovery, personalized treatment, and predictive analytics."),
             ],
             "facts": "The podcast discussed AI applications in healthcare",
             "description": "Test query about last topic"
@@ -130,10 +131,12 @@ class TestPodcastAgent(unittest.TestCase):
                 
                 try:
                     # Execute the function
-                    result = chatbot_entry(
-                        query=test_case["query"],
-                        history=test_case["history"],
-                        facts=test_case["facts"]
+                    result = asyncio.run(
+                        chatbot_entry(
+                            query=test_case["query"],
+                            history=test_case["history"],
+                            facts=test_case["facts"],
+                        )
                     )
                     
                     # Check result type
@@ -184,15 +187,17 @@ class TestIntegration(unittest.TestCase):
             
             # Use RAG result in chatbot
             history = [
-                Message(role="user", content=query),
-                Message(role="assistant", content=rag_result),
+                HumanMessage(content=query),
+                AIMessage(content=rag_result),
             ]
             
             # Test chatbot with RAG result in history
-            chatbot_result = chatbot_entry(
-                query="Can you summarize what you just told me?",
-                history=history,
-                facts=f"The user asked about {query}"
+            chatbot_result = asyncio.run(
+                chatbot_entry(
+                    query="Can you summarize what you just told me?",
+                    history=history,
+                    facts=f"The user asked about {query}",
+                )
             )
             
             # Verify results

@@ -14,7 +14,7 @@ from agents.memory_db import (
     SESSION_ID
 )
 from agents.podcast_agent import execute_rag_response
-from ell import Message
+from langchain_core.messages import AIMessage, HumanMessage
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -61,7 +61,7 @@ def handle_create_session():
         st.session_state.session_active = True
         st.session_state.history = []
         st.session_state.messages = [
-            Message(role="assistant", content="Hello! I'm a podcast host. Ask me anything about the podcast.")
+            AIMessage(content="Hello! I'm a podcast host. Ask me anything about the podcast.")
         ]
         logger.info(f"Created new session with ID: {SESSION_ID}")
 
@@ -95,10 +95,15 @@ def get_message_text(message) -> str:
     """Extract text content from a message object safely."""
     if isinstance(message.content, str):
         return message.content
-    elif hasattr(message.content, "__getitem__") and len(message.content) > 0:
-        if hasattr(message.content[-1], "text"):
-            return message.content[-1].text
     return str(message.content)
+
+def get_message_role(message) -> str:
+    """Map LangChain message types to Streamlit roles."""
+    if isinstance(message, HumanMessage):
+        return "user"
+    if isinstance(message, AIMessage):
+        return "assistant"
+    return "assistant"
 
 # UI components
 with st.expander("Session Management"):
@@ -126,14 +131,12 @@ async def process_user_input(prompt: str, facts_content: str):
             )
             
             # Check if RAG processing is needed
-            use_rag = False
-            if hasattr(response.content[-1], "parsed") and hasattr(response.content[-1].parsed, "use_rag"):
-                use_rag = str(response.content[-1].parsed.use_rag).lower() == "true"
+            use_rag = bool(response.use_rag)
             
             # Handle RAG response if requested
             if use_rag:
-                user_intent = response.content[-1].parsed.user_intent if hasattr(response.content[-1].parsed, "user_intent") else ""
-                output_emotion = response.content[-1].parsed.output_emotion if hasattr(response.content[-1].parsed, "output_emotion") else ""
+                user_intent = response.user_intent or ""
+                output_emotion = response.output_emotion or ""
                 
                 rag_response = execute_rag_response(
                     query=prompt,
@@ -144,7 +147,7 @@ async def process_user_input(prompt: str, facts_content: str):
                 assistant_content = rag_response
             else:
                 # Use regular response
-                assistant_content = response.content[-1].parsed.answer if hasattr(response.content[-1].parsed, "answer") else str(response.content[-1])
+                assistant_content = response.answer
             
             # Store message in memory
             add_memory(
@@ -154,18 +157,18 @@ async def process_user_input(prompt: str, facts_content: str):
             )
             
             # Add to session messages
-            st.session_state.messages.append(Message(role="assistant", content=assistant_content))
+            st.session_state.messages.append(AIMessage(content=assistant_content))
             
             # Summarize for history
             summary = summarize_conversation(conversation=assistant_content)
-            st.session_state.history.append(Message(role="assistant", content=summary))
+            st.session_state.history.append(AIMessage(content=summary))
             
             return assistant_content
             
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
             error_msg = "I'm sorry, I encountered an error processing your request. Please try again."
-            st.session_state.messages.append(Message(role="assistant", content=error_msg))
+            st.session_state.messages.append(AIMessage(content=error_msg))
             return error_msg
 
 async def main():
@@ -177,15 +180,15 @@ async def main():
         
     # Display chat history
     for message in st.session_state.messages:
-        with st.chat_message(message.role):
+        with st.chat_message(get_message_role(message)):
             st.markdown(get_message_text(message))
     
     # Handle user input
     prompt = st.chat_input(placeholder="Ask me anything about the podcast")
     if prompt:
         # Add user message to state
-        st.session_state.messages.append(Message(role="user", content=prompt))
-        st.session_state.history.append(Message(role="user", content=prompt))
+        st.session_state.messages.append(HumanMessage(content=prompt))
+        st.session_state.history.append(HumanMessage(content=prompt))
         
         # Display user message
         with st.chat_message("user"):

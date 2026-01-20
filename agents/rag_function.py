@@ -3,7 +3,6 @@ from typing import Optional, List, Tuple, Dict, Any
 from functools import lru_cache
 
 from agents.rag_db import get_results
-from agents.clients import cohere_client
 from agents.rag_agent import (
     grade_answer,
     grade_document,
@@ -19,8 +18,8 @@ logger = logging.getLogger(__name__)
 # Configuration
 DEFAULT_COLLECTION = "podcasts"
 DEFAULT_LIMIT = 5
-RERANKER_MODEL = "rerank-english-v3.0"
-RERANKER_TOP_N = 5
+RERANKER_MODEL = None
+RERANKER_TOP_N = 0
 
 def get_documents(query: str, limit: Optional[int] = DEFAULT_LIMIT, collection_name: str = DEFAULT_COLLECTION, 
                   use_reranker: bool = False) -> List[str]:
@@ -51,25 +50,9 @@ def get_documents(query: str, limit: Optional[int] = DEFAULT_LIMIT, collection_n
             logger.info(f"No results found for query: {query}")
             return []
 
-        # Apply reranking if requested
-        if use_reranker and cohere_client:
-            try:
-                logger.info(f"Reranking {len(results)} documents")
-                reranker = cohere_client.rerank(
-                    model=RERANKER_MODEL, 
-                    query=query, 
-                    documents=results, 
-                    return_documents=False, 
-                    top_n=min(RERANKER_TOP_N, len(results))
-                )
-                indices = [reranker[i].index for i in range(len(reranker))]
-                documents = [results[i] for i in indices]
-                return documents
-            except Exception as e:
-                logger.error(f"Reranking failed: {e}. Falling back to original results.")
-                return results
-        else:
-            return results
+        if use_reranker:
+            logger.warning("Reranking requested, but OpenAI-only mode is enabled. Skipping rerank.")
+        return results
     except Exception as e:
         logger.error(f"Error in get_documents: {e}")
         raise
@@ -99,7 +82,7 @@ def grade_documents(query: str, documents: List[str]) -> List[str]:
             try:
                 logger.info(f"Grading document {i+1}/{len(documents)}")
                 grade = grade_document(query=query, document=document)
-                binary_score = grade.content[-1].parsed.binary_score
+                binary_score = grade.binary_score
                 
                 if binary_score == "yes":
                     final_document_list.append(document)
@@ -176,7 +159,7 @@ def hallucination_score(documents: List[str], answer: str) -> str:
 
         logger.info("Checking for hallucinations in the generated answer")
         result = check_hallucinations_llm(document=documents, answer=answer)
-        binary_score = result.content[-1].parsed.binary_score
+        binary_score = result.binary_score
         
         logger.info(f"Hallucination check result: {binary_score}")
         return binary_score
@@ -206,7 +189,7 @@ def evaluate_answer(answer: str, question: str) -> str:
 
         logger.info("Evaluating if answer resolves the question")
         grade = grade_answer(answer=answer, question=question)
-        binary_score = grade.content[-1].parsed.binary_score
+        binary_score = grade.binary_score
         
         logger.info(f"Answer evaluation result: {binary_score}")
         return binary_score
@@ -220,7 +203,7 @@ def requery(query: str) -> str:
     Reformulate the query to improve retrieval results.
 
     Args:
-        original_query: The original query text
+        query: The original query text
 
     Returns:
         Reformulated query
@@ -235,14 +218,7 @@ def requery(query: str) -> str:
 
         logger.info(f"Reformulating query: {query}")
         response = requery_llm(query=query)
-        if hasattr(response, "content") and response.content:
-            parsed = getattr(response.content[-1], "parsed", None)
-            if parsed and hasattr(parsed, "new_query"):
-                return parsed.new_query
-        return str(response).strip() or query
-        
-        logger.info(f"Original query: '{original_query}' -> Reformulated: '{new_query}'")
-        return new_query
+        return response.new_query or query
     except Exception as e:
         logger.error(f"Error in requery: {e}")
         # Return original query if reformulation fails

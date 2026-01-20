@@ -1,10 +1,13 @@
-import os
 import logging
-from typing import List, Optional
-import ell
-from pydantic import BaseModel, Field
+import os
+from typing import List
+
 from dotenv import load_dotenv
-from agents.memory_db import zep_client, SESSION_ID
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
+
+from agents.clients import get_chat_model
+from agents.memory_db import SESSION_ID, zep_client
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -30,15 +33,6 @@ if not openai_api_key:
 
 # Set OpenAI API key
 os.environ["OPENAI_API_KEY"] = openai_api_key
-
-# Initialize ELL
-try:
-    ell.init(store=CONFIG["log_dir"])
-    logger.info("ELL initialized successfully")
-except Exception as e:
-    logger.error(f"Error initializing ELL: {e}")
-    raise
-
 
 class ChatbotEntry(BaseModel):
     """Model for chatbot response entry."""
@@ -90,7 +84,6 @@ def load_system_prompt() -> str:
         """
 
 
-@ell.tool()
 def search_chatbot_history(query: str = Field(description="Query to search the user long term history")) -> List[str]:
     """Search through chatbot history for previous sessions.
     
@@ -122,8 +115,7 @@ def search_chatbot_history(query: str = Field(description="Query to search the u
         return ["Error retrieving history. Please try again."]
 
 
-@ell.complex(model=CONFIG["model"], response_format=ChatbotEntry)
-def chatbot_entry(query: str, history: List[ell.Message], facts: str) -> ChatbotEntry:
+async def chatbot_entry(query: str, history: List[BaseMessage], facts: str) -> ChatbotEntry:
     """Entry point to the chatbot agent.
     
     Args:
@@ -137,15 +129,29 @@ def chatbot_entry(query: str, history: List[ell.Message], facts: str) -> Chatbot
     system_prompt = load_system_prompt()
     
     try:
-        return [
-            ell.system(system_prompt)
-        ] + history + [
-            ell.user(f"Output answer should contain, the answer to user query, any URL links, timestamps and the speaker name.\n\nQuery: {query} \n\n Summarised History: \n {facts}\n")
+        model = get_chat_model(CONFIG["model"], temperature=0.2).with_structured_output(ChatbotEntry)
+        messages = [
+            SystemMessage(system_prompt),
+            *history,
+            HumanMessage(
+                "Output answer should contain, the answer to user query, any URL links, "
+                "timestamps and the speaker name.\n\n"
+                f"Query: {query}\n\nSummarised History:\n{facts}\n"
+            ),
         ]
+        return await model.ainvoke(messages)
     except Exception as e:
         logger.error(f"Error in chatbot_entry: {e}")
         # Fallback response
-        return [
-            ell.system("You are a helpful assistant."),
-            ell.user("The system encountered an error. Please provide a simple, helpful response.")
+        fallback = get_chat_model(CONFIG["model"], temperature=0.2)
+        messages = [
+            SystemMessage("You are a helpful assistant."),
+            HumanMessage("The system encountered an error. Please provide a simple, helpful response."),
         ]
+        response = await fallback.ainvoke(messages)
+        return ChatbotEntry(
+            answer=response.content or "I'm sorry, something went wrong.",
+            use_rag=True,
+            user_intent="error",
+            output_emotion="neutral",
+        )

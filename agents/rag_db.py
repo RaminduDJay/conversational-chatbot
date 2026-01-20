@@ -1,14 +1,14 @@
-import os
 import logging
-from typing import List, Dict, Optional, Any, Union, Set
+import os
 from functools import lru_cache
+from typing import Any, Dict, List, Optional, Set
 
-import openai
-import groq
+from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.exceptions import UnexpectedResponse
-from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -23,10 +23,9 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     QDRANT_CLOUD_API_KEY = os.getenv("QDRANT_CLOUD_API_KEY")
     QDRANT_URL = os.getenv("QDRANT_URL", "https://3973cdf9-4ba6-40b1-ae92-b2f952f82fb9.europe-west3-0.gcp.cloud.qdrant.io:6333")
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
     VECTOR_SIZE = int(os.getenv("VECTOR_SIZE", "1536"))
-    ENTITY_MODEL = os.getenv("ENTITY_MODEL", "llama3-8b-8192")
+    ENTITY_MODEL = os.getenv("ENTITY_MODEL", "gpt-4o-mini")
 
 # Validate required environment variables
 def validate_config() -> None:
@@ -37,8 +36,6 @@ def validate_config() -> None:
         missing_vars.append("OPENAI_API_KEY")
     if not Config.QDRANT_CLOUD_API_KEY:
         missing_vars.append("QDRANT_CLOUD_API_KEY")
-    if not Config.GROQ_API_KEY:
-        missing_vars.append("GROQ_API_KEY")
         
     if missing_vars:
         raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
@@ -49,23 +46,17 @@ def init_clients():
     try:
         validate_config()
         
-        # Initialize OpenAI client
-        openai_client = openai.Client(api_key=Config.OPENAI_API_KEY)
-        
         # Initialize Qdrant client
         qdrant_client = QdrantClient(
             url=Config.QDRANT_URL,
             api_key=Config.QDRANT_CLOUD_API_KEY,
             timeout=10.0  # Add timeout for operations
         )
-        
-        # Initialize Groq client
-        groq_client = groq.Groq(
-            api_key=Config.GROQ_API_KEY,
-        )
-        
+        embeddings = OpenAIEmbeddings(model=Config.EMBEDDING_MODEL)
+        entity_llm = ChatOpenAI(model=Config.ENTITY_MODEL, temperature=0.0)
+
         logger.info("All clients initialized successfully")
-        return openai_client, qdrant_client, groq_client
+        return embeddings, qdrant_client, entity_llm
     
     except Exception as e:
         logger.error(f"Failed to initialize clients: {e}")
@@ -73,7 +64,7 @@ def init_clients():
 
 # Initialize clients
 try:
-    openai_client, qdrant_client, groq_client = init_clients()
+    embeddings_client, qdrant_client, entity_llm = init_clients()
 except Exception as e:
     logger.error(f"Client initialization failed: {e}")
     raise
@@ -102,18 +93,14 @@ def get_embedding(text: str) -> List[float]:
         Exception: If there's an error getting embeddings
     """
     try:
-        response = openai_client.embeddings.create(
-            input=text, 
-            model=Config.EMBEDDING_MODEL
-        )
-        return response.data[0].embedding
+        return embeddings_client.embed_query(text)
     except Exception as e:
         logger.error(f"Error getting embedding: {e}")
         raise
 
 def get_entities(text: str) -> List[str]:
     """
-    Get entities from the given text using GROQ.
+    Get entities from the given text using OpenAI.
     
     Args:
         text: The text to extract entities from
@@ -125,16 +112,13 @@ def get_entities(text: str) -> List[str]:
         Exception: If there's an error extracting entities
     """
     try:
-        response = groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": KEYWORD_PROMPT}, 
-                {"role": "user", "content": text}
-            ],
-            model=Config.ENTITY_MODEL,
-            temperature=0.0,  # Lower temperature for more deterministic results
+        response = entity_llm.invoke(
+            [
+                SystemMessage(KEYWORD_PROMPT),
+                HumanMessage(text),
+            ]
         )
-        
-        entities = [entity.strip() for entity in response.choices[0].message.content.split(",")]
+        entities = [entity.strip() for entity in response.content.split(",")]
         return [entity for entity in entities if entity]  # Filter out empty strings
     
     except Exception as e:
