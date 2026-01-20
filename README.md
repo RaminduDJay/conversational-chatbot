@@ -9,16 +9,12 @@ To run this project, you will need to add the following environment variables to
 ```bash
 QDRANT_CLOUD_API_KEY
 OPENAI_API_KEY
-GROQ_API_KEY
 ZEP_API_KEY
-COHERE_API_KEY
 ```
 Where to get API keys\
 `QDRANT_CLOUD_API_KEY` from https://qdrant.tech \
 `OPENAI_API_KEY` from https://platform.openai.com \
-`GROQ_API_KEY` from https://console.groq.com \
 `ZEP_API_KEY` from https://www.getzep.com \
-`COHERE_API_KEY` from https://dashboard.cohere.com \
 
 
 ## Run Locally
@@ -58,8 +54,4 @@ run app
   uv run streamlit run app.py
 ```
 
-run ell studio 
-
-```bash
-  ell-studio --storage ./logdir
-```
+This project uses OpenAI + LangChain for LLM orchestration.
