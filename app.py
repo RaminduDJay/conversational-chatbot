@@ -135,7 +135,7 @@ async def process_user_input(prompt: str, facts_content: str):
                 user_intent = response.content[-1].parsed.user_intent if hasattr(response.content[-1].parsed, "user_intent") else ""
                 output_emotion = response.content[-1].parsed.output_emotion if hasattr(response.content[-1].parsed, "output_emotion") else ""
                 
-                rag_response = await execute_rag_response(
+                rag_response = execute_rag_response(
                     query=prompt,
                     user_intent=user_intent,
                     output_emotion=output_emotion,
@@ -147,17 +147,17 @@ async def process_user_input(prompt: str, facts_content: str):
                 assistant_content = response.content[-1].parsed.answer if hasattr(response.content[-1].parsed, "answer") else str(response.content[-1])
             
             # Store message in memory
-            await add_memory(
+            add_memory(
                 session_id=SESSION_ID,
                 user_content=prompt,
-                assistent_content=assistant_content,
+                assistant_content=assistant_content,
             )
             
             # Add to session messages
             st.session_state.messages.append(Message(role="assistant", content=assistant_content))
             
             # Summarize for history
-            summary = await summarize_conversation(conversation=assistant_content)
+            summary = summarize_conversation(conversation=assistant_content)
             st.session_state.history.append(Message(role="assistant", content=summary))
             
             return assistant_content
