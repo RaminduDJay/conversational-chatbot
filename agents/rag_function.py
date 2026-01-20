@@ -4,7 +4,13 @@ from functools import lru_cache
 
 from agents.rag_db import get_results
 from agents.clients import cohere_client
-from agents.rag_agents import grade_answer, grade_document, check_hallucinations, llm_answer, reformulate_query
+from agents.rag_agent import (
+    grade_answer,
+    grade_document,
+    check_hallucinations as check_hallucinations_llm,
+    llm_answer,
+    requery as requery_llm,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -149,7 +155,7 @@ def llm_generation(query: str, intent: str, output_sentiment: str, documents: Li
         logger.error(f"Error in llm_generation: {e}")
         return f"I'm sorry, I encountered an error while generating a response: {str(e)}", documents
 
-def check_hallucinations(documents: List[str], answer: str) -> str:
+def hallucination_score(documents: List[str], answer: str) -> str:
     """
     Check if the answer is grounded in the provided documents.
 
@@ -169,13 +175,13 @@ def check_hallucinations(documents: List[str], answer: str) -> str:
             return "no"
 
         logger.info("Checking for hallucinations in the generated answer")
-        result = check_hallucinations(document=documents, answer=answer)
+        result = check_hallucinations_llm(document=documents, answer=answer)
         binary_score = result.content[-1].parsed.binary_score
         
         logger.info(f"Hallucination check result: {binary_score}")
         return binary_score
     except Exception as e:
-        logger.error(f"Error in check_hallucinations: {e}")
+        logger.error(f"Error in hallucination_score: {e}")
         # Default to "no" (assume hallucination) in case of error
         return "no"
 
@@ -209,7 +215,7 @@ def evaluate_answer(answer: str, question: str) -> str:
         # Default to "no" in case of error
         return "no"
 
-def reformulate_query(original_query: str) -> str:
+def requery(query: str) -> str:
     """
     Reformulate the query to improve retrieval results.
 
@@ -223,19 +229,24 @@ def reformulate_query(original_query: str) -> str:
         Exception: If query reformulation fails
     """
     try:
-        if not original_query.strip():
+        if not query.strip():
             logger.warning("Empty query provided for reformulation")
-            return original_query
+            return query
 
-        logger.info(f"Reformulating query: {original_query}")
-        new_query = reformulate_query(original_query)
+        logger.info(f"Reformulating query: {query}")
+        response = requery_llm(query=query)
+        if hasattr(response, "content") and response.content:
+            parsed = getattr(response.content[-1], "parsed", None)
+            if parsed and hasattr(parsed, "new_query"):
+                return parsed.new_query
+        return str(response).strip() or query
         
         logger.info(f"Original query: '{original_query}' -> Reformulated: '{new_query}'")
         return new_query
     except Exception as e:
-        logger.error(f"Error in reformulate_query: {e}")
+        logger.error(f"Error in requery: {e}")
         # Return original query if reformulation fails
-        return original_query
+        return query
 
 @lru_cache(maxsize=32)
 def get_and_grade_documents(query: str, limit: Optional[int] = DEFAULT_LIMIT) -> List[str]:
@@ -297,7 +308,7 @@ def complete_rag_pipeline(
         # Step 1: Query reformulation (optional)
         working_query = query
         if reformulate:
-            working_query = reformulate_query(query)
+            working_query = requery(query)
             pipeline_results["reformulated_query"] = working_query
         
         # Step 2: Document retrieval
@@ -320,7 +331,7 @@ def complete_rag_pipeline(
             pipeline_results["answer"] = answer
             
             # Step 5: Hallucination check
-            pipeline_results["is_hallucination"] = check_hallucinations(
+            pipeline_results["is_hallucination"] = hallucination_score(
                 documents=used_docs,
                 answer=answer
             )
